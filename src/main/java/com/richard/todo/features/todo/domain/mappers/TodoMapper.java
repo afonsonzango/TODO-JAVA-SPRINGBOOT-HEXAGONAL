@@ -9,10 +9,12 @@ import org.mapstruct.Mapping;
 
 @Mapper(componentModel = "spring", uses = UserMapper.class)
 public interface TodoMapper {
-	@Mapping(target = "user", ignore = true)
 	TodoModel toModel(TodoEntity entity);
 
+	@Mapping(target = "createdAt", ignore = true)
+	@Mapping(target = "updatedAt", ignore = true)
 	TodoEntity toEntity(TodoModel model);
 
+	@Mapping(source = "user.id", target = "userId")
 	TodoResponseDTO toResponseDTO(TodoModel model);
 }
