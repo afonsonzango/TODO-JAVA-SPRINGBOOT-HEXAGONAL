@@ -1,0 +1,151 @@
+---
+description: Diretriz principal — arquitetura hexagonal (ports & adapters). Regra de dependência, estrutura de pastas e template por feature.
+alwaysApply: true
+---
+
+# Diretriz de organização — arquitetura hexagonal (ports & adapters)
+
+**Regra mais importante deste projeto.** Ao implementar ou alterar código, seguir sempre esta organização e as regras de dependência abaixo.
+
+Este documento descreve **como este serviço está organizado** e serve como **guia reutilizável** para outros projetos. O foco está em **pastas, responsabilidades e regras de dependência**, não em detalhes de uma tecnologia concreta.
+
+---
+
+## 1. Ideia central
+
+A **arquitetura hexagonal** (também chamada *ports and adapters*) separa o que é **regra de negócio estável** do que é **detalhe técnico mutável** (HTTP, base de dados, filas, e-mail, etc.).
+
+- O **núcleo** (domínio + casos de uso) **não depende** de frameworks nem de drivers externos.
+- Tudo que vem “de fora” entra por **adaptadores** que implementam **portas** (contratos) definidas pelo núcleo.
+
+Muda a sintaxe e as ferramentas; **não muda a direção das dependências**.
+
+---
+
+## 2. Regra de dependência (o que pode importar o quê)
+
+Ordem mental, de “mais interno” para “mais externo”:
+
+1. **Domínio** — entidades, value objects, exceções de negócio, invariantes; sem I/O.
+2. **Aplicação (casos de uso)** — orquestra o domínio; define **portas de entrada** e **portas de saída**.
+3. **Adaptadores de entrada** — HTTP, CLI, consumidores de fila, jobs: traduzem o protocolo externo para portas de entrada.
+4. **Infraestrutura / adaptadores de saída** — implementações concretas das portas de saída.
+
+**Regra:** camadas internas **não referenciam** camadas externas. O mundo externo depende do contrato, não o contrato do MySQL ou do framework web.
+
+---
+
+## 3. Estrutura de pastas no repositório (nível `src`)
+
+```text
+projeto/
+├── src/
+│   ├── main/
+│   │   ├── <código da aplicação>   # ex.: java/ — ver secções 4 e 5
+│   │   └── resources/
+│   ├── test/
+│   └── native-test/                # opcional
+├── build.* / package.*
+└── docs/
+```
+
+- **`src/main`**: artefacto implantável.
+- **`src/main/resources`**: config, chaves, assets — **sem** lógica de negócio.
+- **`src/test`**: testes rápidos (unitários / integração leve).
+
+Replicar por baixo do código-fonte a árvore lógica `root` / `features` / (opcional) fluxos transversais.
+
+---
+
+## 4. Três zonas lógicas dentro do código
+
+### 4.1 `root` — núcleo transversal
+
+Configuração geral, DTOs partilhados, tratamento transversal de erros. **Só** o que é **realmente transversal**; o resto fica na feature.
+
+### 4.2 `features/<nome_da_feature>` — fatias verticais
+
+Cada pasta é um **contexto** (ex.: todo, utilizador). Dentro repetem-se as camadas hexagonais (secção 5).
+
+### 4.3 Fluxos que atravessam várias features (opcional)
+
+`transactionas/<fluxo>` — orquestração explícita entre contextos (mesmo papel que `flows/`, `processes/` noutros projetos).
+
+---
+
+## 5. Estrutura interna de cada feature (template)
+
+```text
+features/<nome>/
+├── domain/
+│   ├── models/
+│   ├── exceptions/
+│   └── mappers/
+├── application/
+│   ├── ports/
+│   │   ├── in/
+│   │   └── out/
+│   ├── services/
+│   └── dtos/
+├── adapters/
+│   └── <protocolo>/          # ex.: rest
+│       ├── controllers ou handlers
+│       └── exceptions/
+└── infrastructure/
+    ├── repository/
+    ├── entity/               # modelos de persistência (≠ domain models)
+    └── <outros>/
+```
+
+- **`domain/models`** vs **`infrastructure/entity`**: negócio vs persistência.
+- **`application/dtos`**: contratos do caso de uso; não expor entidades de persistência nos adaptadores de entrada.
+- **`adapters/.../exceptions`**: traduzir erros de domínio/aplicação para o formato da API.
+
+---
+
+## 6. Nomenclatura das portas
+
+| Direção | Papel | Nome sugerido |
+|--------|--------|----------------|
+| Entrada | Caso de uso exposto ao exterior | `*ServiceInPort`, `*UseCase`, `Handle*` |
+| Saída | Persistência, fila, relógio, terceiros | `*RepositoryOutPort`, `*Gateway`, `*Publisher` |
+
+---
+
+## 7. Checklist para novas features
+
+1. `features/<nome>/domain` — modelos e exceções.
+2. `application/ports/in` — o que a feature oferece.
+3. `application/ports/out` — o que precisa do mundo (sem implementar).
+4. `application/services` — casos de uso (só domínio + portas).
+5. `infrastructure` — repositórios/clientes.
+6. `adapters` — HTTP/etc., só portas de entrada.
+7. Testes: domínio sem I/O; casos de uso com fakes; integração na infra opcional.
+
+---
+
+## 8. Mapeamento para este repositório (`todo.list`)
+
+Stack: **Java 17**, **Spring Boot**, pacote base **`com.richard.todo`**.
+
+Código de aplicação sob `src/main/java/com/richard/todo/`:
+
+| Zona | Pastas / pacotes |
+|------|------------------|
+| Bootstrap | `Application.java` na raiz do pacote (único ponto Spring Boot) |
+| Transversal | `root/configs`, `root/shared`, `root/core` |
+| Features | `features/<nome>/` — ex.: `features/todo` quando existir |
+| Fluxo coordenado | `transactionas/<fluxo>/` — só se um caso de uso cruzar várias features |
+| Recursos | `src/main/resources` |
+
+Cada `features/<nome>` e cada `transactionas/<fluxo>` seguem o **template da secção 5**. Novo código **não** deve ir para pacotes planos tipo `controller`, `service`, `repository` na raiz — usar a árvore por contexto.
+
+---
+
+## 9. O que ganham com este padrão
+
+- Substituir BD, fila ou framework **sem reescrever** regras de negócio.
+- Onboarding por **contexto** (`features/...`), não por tipo técnico global.
+- Testes mais baratos no domínio e casos de uso.
+
+Ao implementar pedidos do utilizador: **respeitar esta estrutura e direção de dependências**; propor refactors alinhados quando o código existente violar o padrão.
